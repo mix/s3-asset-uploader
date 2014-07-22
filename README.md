@@ -2,7 +2,7 @@
 for putting assets on s3
 
 ``` js
-var Sync = expa.util('s3-sync').S3sync
+var Sync = require('s3-asset-uploader').S3sync
 var config =  {
     "key": "<key>"
   , "secret": "<secret>"
