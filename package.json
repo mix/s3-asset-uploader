@@ -20,5 +20,13 @@
   "bugs": {
     "url": "https://github.com/openlikes/s3-asset-uploader/issues"
   },
-  "homepage": "https://github.com/openlikes/s3-asset-uploader"
+  "homepage": "https://github.com/openlikes/s3-asset-uploader",
+  "dependencies": {
+    "klass": "~1.4.0",
+    "mime": "~1.2.11",
+    "valentine": "~2.1.0",
+    "findit": "~2.0.0",
+    "when": "~3.4.2",
+    "knox": "~0.9.0"
+  }
 }
