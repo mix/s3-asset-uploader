@@ -15,5 +15,8 @@ new Sync(config, {
   , prefix: '/assets'
   , ignorePath: './public/js/vendor'
   , digest: 'config/asset-map.json'
+  , complete: function () {
+      console.log('done')
+    }
 })
 ```
