@@ -150,6 +150,7 @@ var S3Sync = klass(function (config, options) {
   , abort: function (e) {
       this._timer && clearTimeout(this._timer)
       debug('S3 sync aborted', e)
+      this.options.complete && this.options.complete(new Error('Sync aborted'))
     }
   , getDigest: function () {
       return this._digest
