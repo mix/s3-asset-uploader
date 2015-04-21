@@ -34,6 +34,8 @@ var S3Sync = klass(function (config, options) {
   , TYPES: {
       'js': 'utf8'
     , 'css': 'utf8'
+    , 'sass': 'utf8'
+    , 'scss': 'utf8'
     , 'png': 'binary'
     , 'jpg': 'binary'
     , 'jpeg': 'binary'
