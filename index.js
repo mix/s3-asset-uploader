@@ -106,13 +106,13 @@ var S3Sync = klass(function (config, options) {
 
       debug('putting original file %s at destination %s', file, s3FileNameWithPrefix)
 
-      var req = this.client.putFile(
+      this.client.putFile(
         file,
         s3FileNameWithPrefix,
         _.extend({}, this.getSettings(), this._mergeHeaders(file)),
         this.md5PreCheck.bind(this, file, md5File, done)
       )
-      req.on('error', function (e) {
+      .on('error', function (e) {
         console.error('error in putting original file', e)
       })
     }
@@ -120,28 +120,28 @@ var S3Sync = klass(function (config, options) {
       this.s3FilePreCheck(md5File)
         .then(function () {
           debug('putting new file', md5File)
-          var req = this.client.putFile(
+          this.client.putFile(
             file,
             md5File,
             _.extend({}, this.getSettings(), this._mergeHeaders(file)),
             done
           )
-          req.on('error', function (e) {
+          .on('error', function (e) {
             console.error('error in putting new file', e)
           })
         }.bind(this), done)
     }
   , s3FilePreCheck: function (file) {
       return new Promise(function (resolve, reject) {
-        var req = this.client.getFile(file, function (err, res) {
+        this.client.getFile(file, function (err, res) {
           if (err) {
             console.error('error in file getFileResponse', err)
             resolve()
           }
           else if (res.statusCode == 404) resolve()
-          else reject(new Error('S3 File precheck failed', res.statusCode))
+          else reject(new Error('S3 File precheck failed [' + res.statusCode + '] for ' + file))
         })
-        req.on('error', function (e) {
+        .on('error', function (e) {
           console.error('error in requesting file on pre-check', file, e)
         })
       }.bind(this))
