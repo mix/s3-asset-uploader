@@ -22,11 +22,11 @@
   },
   "homepage": "https://github.com/openlikes/s3-asset-uploader",
   "dependencies": {
-    "klass": "~1.4.0",
-    "mime": "~1.2.11",
-    "valentine": "~2.1.0",
+    "bluebird": "^3.1.5",
     "findit": "~2.0.0",
-    "when": "~3.4.2",
-    "knox": "~0.9.0"
+    "klass": "~1.4.0",
+    "knox": "^0.9.2",
+    "mime": "~1.2.11",
+    "valentine": "~2.1.0"
   }
 }

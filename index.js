@@ -5,7 +5,7 @@ var fs = require('fs')
   , finder = require('findit')
   , debug = require('debug')('ol:s3')
   , klass = require('klass')
-  , when = require('when')
+  , Promise = require('bluebird')
   , knox = require('knox')
   , mime = require('mime')
   , _ = require('valentine')
@@ -132,22 +132,19 @@ var S3Sync = klass(function (config, options) {
         }.bind(this), done)
     }
   , s3FilePreCheck: function (file) {
-      var defer = when.defer()
-      var req = this.client.getFile(file, this.handleGetFileResponse(defer))
-      req.on('error', function (e) {
-        console.error('error in requesting file on pre-check', file, e)
-      })
-      return defer.promise
-    }
-  , handleGetFileResponse: function (defer) {
-      return function (err, res) {
-        if (err) {
-          console.error('error in file getFileResponse', err)
-          defer.resolve()
-        }
-        else if (res.statusCode == 404) defer.resolve()
-        else defer.reject()
-      }
+      return new Promise(function (resolve, reject) {
+        var req = this.client.getFile(file, function (err, res) {
+          if (err) {
+            console.error('error in file getFileResponse', err)
+            resolve()
+          }
+          else if (res.statusCode == 404) resolve()
+          else reject(new Error('S3 File precheck failed', res.statusCode))
+        })
+        req.on('error', function (e) {
+          console.error('error in requesting file on pre-check', file, e)
+        })
+      }.bind(this))
     }
   , abort: function (e) {
       this._timer && clearTimeout(this._timer)
