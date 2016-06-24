@@ -89,7 +89,7 @@ var S3Sync = klass(function (config, options) {
       )
     }
   , readFileContents: function (file) {
-      return fs.readFileSync(file, this.constructor.TYPES[file.match(/\.(\w+)$/)[1]])
+      return fs.readFileSync(file, this.constructor.TYPES[file.split('.').pop()])
     }
   , hashContents: function (file) {
       var contents = this.readFileContents(file)
