@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/openlikes/s3-asset-uploader.git"
+    "url": "git://github.com/mix/s3-asset-uploader.git"
   },
   "keywords": [
     "s3",
@@ -18,14 +18,14 @@
   "author": "OpenLikes",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/openlikes/s3-asset-uploader/issues"
+    "url": "https://github.com/mix/s3-asset-uploader/issues"
   },
-  "homepage": "https://github.com/openlikes/s3-asset-uploader",
+  "homepage": "https://github.com/mix/s3-asset-uploader",
   "dependencies": {
     "bluebird": "^3.1.5",
     "findit": "~2.0.0",
     "klass": "~1.4.0",
-    "knox": "^0.9.2",
+    "aws-sdk": "^2.4.6",
     "mime": "~1.2.11",
     "valentine": "~2.1.0"
   }
