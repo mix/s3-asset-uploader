@@ -66,8 +66,9 @@ var S3Sync = klass(function (config, options) {
   , start: function () {
       if (!this._files.length) {
         this.writeDigestFile(function (err, resp) {
-          debug('wrote digest file')
-          this.options.complete && this.options.complete()
+          if (!err) debug('wrote digest file', resp)
+          else debug('error writing digest file', err)
+          this.options.complete && this.options.complete(err)
         }.bind(this))
       }
       else if (this._inProgress) (this._timer = setTimeout(this.start.bind(this), 50))
@@ -91,11 +92,7 @@ var S3Sync = klass(function (config, options) {
         Bucket: this.bucket,
         Key: digestKey
       }, headers))
-      .send(function(err, data) {
-        if (err) {
-          console.error('error in writing digest file', err)
-        } else {callback()}
-      }.bind(this))
+      .send(callback)
     }
   , readFileContents: function (file) {
       return fs.readFileSync(file, this.constructor.TYPES[file.split('.').pop()])
