@@ -1,18 +1,20 @@
 var fs = require('fs')
   , crypto = require('crypto')
   , path = require('path')
-
   , finder = require('findit')
   , debug = require('debug')('ol:s3')
   , klass = require('klass')
   , Promise = require('bluebird')
-  , knox = require('knox')
+  , AWS = require('aws-sdk')
   , mime = require('mime')
-  , _ = require('valentine')
+  , v = require('valentine')
 
 var S3Sync = klass(function (config, options) {
   this.options = options
-  this.client = knox.createClient(config)
+  AWS.config.accessKeyId = config.key
+  AWS.config.secretKeyId = config.secret
+  this.client = new AWS.S3()
+  this.bucket = config.bucket
   this.path = options.path
   this.prefix = options.prefix || ''
   this.digest = options.digest
@@ -29,7 +31,7 @@ var S3Sync = klass(function (config, options) {
         .digest('hex')
     }
   , defaultHeaders: {
-      'x-amz-acl': 'public-read'
+      'ACL': 'public-read'
     }
   , TYPES: {
       'js': 'utf8'
@@ -50,7 +52,7 @@ var S3Sync = klass(function (config, options) {
         .on('end', this.start.bind(this))
     }
   , getSettings: function () {
-      return _.extend({}, this.options.headers || {}, this.constructor.defaultHeaders)
+      return v.extend({}, this.options.headers || {}, this.constructor.defaultHeaders)
     }
   , finder: function (path) {
       return finder(path)
@@ -66,7 +68,7 @@ var S3Sync = klass(function (config, options) {
         this.writeDigestFile(function (err, resp) {
           debug('wrote digest file')
           this.options.complete && this.options.complete()
-        })
+        }.bind(this))
       }
       else if (this._inProgress) (this._timer = setTimeout(this.start.bind(this), 50))
       else {
@@ -81,12 +83,19 @@ var S3Sync = klass(function (config, options) {
       }
     }
   , writeDigestFile: function (callback) {
-      this.client.putBuffer(
-        new Buffer(JSON.stringify(this.getDigest())),
-        this.digest,
-        _.extend({}, this.getSettings(), this._mergeHeaders(this.digest)),
-        callback.bind(this)
-      )
+      var headers = v.extend({}, this.getSettings(), this._mergeHeaders(this.digest))
+      var digestKey = this.prefix + this.digest
+
+      this.client.upload(v.extend({
+        Body: JSON.stringify(this.getDigest()),
+        Bucket: this.bucket,
+        Key: digestKey
+      }, headers))
+      .send(function(err, data) {
+        if (err) {
+          console.error('error in writing digest file', err)
+        } else {callback()}
+      }.bind(this))
     }
   , readFileContents: function (file) {
       return fs.readFileSync(file, this.constructor.TYPES[file.split('.').pop()])
@@ -106,43 +115,55 @@ var S3Sync = klass(function (config, options) {
 
       debug('putting original file %s at destination %s', file, s3FileNameWithPrefix)
 
-      this.client.putFile(
-        file,
-        s3FileNameWithPrefix,
-        _.extend({}, this.getSettings(), this._mergeHeaders(file)),
-        this.md5PreCheck.bind(this, file, md5File, done)
-      )
-      .on('error', function (e) {
-        console.error('error in putting original file', e)
-      })
+      var body =  fs.createReadStream(file)
+      var headers = v.extend({}, this.getSettings(), this._mergeHeaders(file))
+
+      this.client.upload(v.extend({
+        Body: body,
+        Bucket: this.bucket,
+        Key: s3FileNameWithPrefix
+      }, headers))
+      .send(function(err, data) {
+        if (err) {
+          console.error('error in putting original file', err)
+        } else {
+          this.md5PreCheck(file, md5File, done)
+        }
+      }.bind(this))
     }
   , md5PreCheck: function (file, md5File, done) {
       this.s3FilePreCheck(md5File)
         .then(function () {
           debug('putting new file', md5File)
-          this.client.putFile(
-            file,
-            md5File,
-            _.extend({}, this.getSettings(), this._mergeHeaders(file)),
-            done
-          )
-          .on('error', function (e) {
-            console.error('error in putting new file', e)
+          var md5body =  fs.createReadStream(file)
+          var md5headers = v.extend({}, this.getSettings(), this._mergeHeaders(md5File))
+          this.client.upload(v.extend({
+            Body: md5body,
+            Bucket: this.bucket,
+            Key: md5File
+          }, md5headers))
+          .send(function(err, data) {
+            if (err)
+              console.error('error in putting new file', err)
+            else{ done() }
           })
         }.bind(this), done)
     }
   , s3FilePreCheck: function (file) {
       return new Promise(function (resolve, reject) {
-        this.client.getFile(file, function (err, res) {
+        this.client.getObject({
+          Bucket: this.bucket,
+          Key: file
+        }, function (err, res) {
           if (err) {
             console.error('error in file getFileResponse', err)
             resolve()
           }
-          else if (res.statusCode == 404) resolve()
-          else reject(new Error('S3 File precheck failed [' + res.statusCode + '] for ' + file))
-        })
-        .on('error', function (e) {
-          console.error('error in requesting file on pre-check', file, e)
+          else if (this.httpResponse.statusCode == 404) resolve()
+          else if (this.httpResponse.statusCode != 200)  {
+            reject(new Error('S3 File precheck failed [' + this.httpResponse.statusCode + '] for ' + file))
+          }
+          else resolve()
         })
       }.bind(this))
     }
@@ -168,10 +189,10 @@ var S3Sync = klass(function (config, options) {
   , _mergeHeaders: function (file) {
       var o = {}
       if (file.match('.gz')) {
-        o['Content-Encoding'] = 'gzip'
-        o['Cache-Control'] = 'max-age=1314000'
+        o['ContentEncoding'] = 'gzip'
+        o['CacheControl'] = 'max-age=1314000'
       }
-      o['Content-Type'] = mime.lookup(file)
+      o['ContentType'] = mime.lookup(file)
       // overwrite `gz` headers
       if (file.match('.js')) o['Content-Type'] = 'application/javascript'
       if (file.match('.css')) o['Content-Type'] = 'text/css'
