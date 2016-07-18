@@ -2,7 +2,7 @@ var fs = require('fs')
   , crypto = require('crypto')
   , path = require('path')
   , finder = require('findit')
-  , debug = require('debug')('ol:s3')
+  , debug = require('debug')('mix:s3')
   , klass = require('klass')
   , Promise = require('bluebird')
   , AWS = require('aws-sdk')
@@ -66,8 +66,8 @@ var S3Sync = klass(function (config, options) {
   , start: function () {
       if (!this._files.length) {
         this.writeDigestFile(function (err, resp) {
-          if (!err) debug('wrote digest file', resp)
-          else debug('error writing digest file', err)
+          if (err) debug('error writing digest file', err)
+          else debug('wrote digest file', resp)
           this.options.complete && this.options.complete(err)
         }.bind(this))
       }
@@ -123,6 +123,7 @@ var S3Sync = klass(function (config, options) {
       .send(function(err, data) {
         if (err) {
           console.error('error in putting original file', err)
+          done(err)
         } else {
           this.md5PreCheck(file, md5File, done)
         }
@@ -140,27 +141,26 @@ var S3Sync = klass(function (config, options) {
             Key: md5File
           }, md5headers))
           .send(function(err, data) {
-            if (err)
+            if (err) {
               console.error('error in putting new file', err)
+              done(err)
+            }
             else{ done() }
           })
         }.bind(this), done)
     }
   , s3FilePreCheck: function (file) {
+      // check for existence of file and reject if it exists to avoid uploading same file again
       return new Promise(function (resolve, reject) {
         this.client.getObject({
           Bucket: this.bucket,
           Key: file
         }, function (err, res) {
-          if (err) {
-            console.error('error in file getFileResponse', err)
-            resolve()
-          }
-          else if (this.httpResponse.statusCode == 404) resolve()
-          else if (this.httpResponse.statusCode != 200)  {
+          if (this.httpResponse.statusCode == 404) resolve()
+          else {
+            console.log('error in getFileResponse', this.httpResponse.statusCode, err)
             reject(new Error('S3 File precheck failed [' + this.httpResponse.statusCode + '] for ' + file))
           }
-          else resolve()
         })
       }.bind(this))
     }
