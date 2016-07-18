@@ -86,12 +86,11 @@ var S3Sync = klass(function (config, options) {
       var headers = _.extend({}, this.getSettings(), this._mergeHeaders(this.digest))
       var digestKey = this.prefix + this.digest
 
-      this.client.upload({
+      this.client.upload(_.merge({
         Body: JSON.stringify(this.getDigest()),
         Bucket: this.bucket,
-        Key: digestKey,
-        headers
-      })
+        Key: digestKey
+      }, headers))
       .send(function(err, data) {
         if (err) {
           console.error('error in writing digest file', err)
