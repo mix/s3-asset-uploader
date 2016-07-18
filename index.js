@@ -68,7 +68,7 @@ var S3Sync = klass(function (config, options) {
         this.writeDigestFile(function (err, resp) {
           debug('wrote digest file')
           this.options.complete && this.options.complete()
-        })
+        }.bind(this))
       }
       else if (this._inProgress) (this._timer = setTimeout(this.start.bind(this), 50))
       else {
@@ -92,8 +92,11 @@ var S3Sync = klass(function (config, options) {
         Key: digestKey,
         headers
       })
-      .on('complete', callback.bind(this))
-      .send()
+      .send(function(err, data) {
+        if (err) {
+          console.error('error in writing digest file', err)
+        } else {callback()}
+      }.bind(this))
     }
   , readFileContents: function (file) {
       return fs.readFileSync(file, this.constructor.TYPES[file.split('.').pop()])
@@ -124,7 +127,7 @@ var S3Sync = klass(function (config, options) {
       })
       .send(function(err, data) {
         if (err) {
-          console.error('error in putting original file', e)
+          console.error('error in putting original file', err)
         } else {
           this.md5PreCheck(file, md5File, done)
         }
@@ -144,7 +147,8 @@ var S3Sync = klass(function (config, options) {
           })
           .send(function(err, data) {
             if (err)
-              console.error('error in putting new file', e)
+              console.error('error in putting new file', err)
+            else{ done() }
           })
         }.bind(this), done)
     }
@@ -159,7 +163,10 @@ var S3Sync = klass(function (config, options) {
             resolve()
           }
           else if (this.httpResponse.statusCode == 404) resolve()
-          else reject(new Error('S3 File precheck failed [' + this.httpResponse.statusCode + '] for ' + file))
+          else if (this.httpResponse.statusCode != 200)  {
+            reject(new Error('S3 File precheck failed [' + this.httpResponse.statusCode + '] for ' + file))
+          }
+          else resolve()
         })
       }.bind(this))
     }
