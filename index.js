@@ -7,7 +7,7 @@ var fs = require('fs')
   , Promise = require('bluebird')
   , AWS = require('aws-sdk')
   , mime = require('mime')
-  , _ = require('valentine')
+  , v = require('valentine')
 
 var S3Sync = klass(function (config, options) {
   this.options = options
@@ -52,7 +52,7 @@ var S3Sync = klass(function (config, options) {
         .on('end', this.start.bind(this))
     }
   , getSettings: function () {
-      return _.extend({}, this.options.headers || {}, this.constructor.defaultHeaders)
+      return v.extend({}, this.options.headers || {}, this.constructor.defaultHeaders)
     }
   , finder: function (path) {
       return finder(path)
@@ -83,10 +83,10 @@ var S3Sync = klass(function (config, options) {
       }
     }
   , writeDigestFile: function (callback) {
-      var headers = _.extend({}, this.getSettings(), this._mergeHeaders(this.digest))
+      var headers = v.extend({}, this.getSettings(), this._mergeHeaders(this.digest))
       var digestKey = this.prefix + this.digest
 
-      this.client.upload(_.merge({
+      this.client.upload(v.extend({
         Body: JSON.stringify(this.getDigest()),
         Bucket: this.bucket,
         Key: digestKey
@@ -116,9 +116,9 @@ var S3Sync = klass(function (config, options) {
       debug('putting original file %s at destination %s', file, s3FileNameWithPrefix)
 
       var body =  fs.createReadStream(file)
-      var headers = _.extend({}, this.getSettings(), this._mergeHeaders(file))
+      var headers = v.extend({}, this.getSettings(), this._mergeHeaders(file))
 
-      this.client.upload(_.merge({
+      this.client.upload(v.extend({
         Body: body,
         Bucket: this.bucket,
         Key: s3FileNameWithPrefix
@@ -136,13 +136,12 @@ var S3Sync = klass(function (config, options) {
         .then(function () {
           debug('putting new file', md5File)
           var md5body =  fs.createReadStream(file)
-          var md5headers = _.extend({}, this.getSettings(), this._mergeHeaders(md5File))
-          this.client.upload({
+          var md5headers = v.extend({}, this.getSettings(), this._mergeHeaders(md5File))
+          this.client.upload(v.extend({
             Body: md5body,
             Bucket: this.bucket,
-            Key: md5File,
-            md5headers
-          })
+            Key: md5File
+          }, md5headers))
           .send(function(err, data) {
             if (err)
               console.error('error in putting new file', err)
