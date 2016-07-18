@@ -31,7 +31,7 @@ var S3Sync = klass(function (config, options) {
         .digest('hex')
     }
   , defaultHeaders: {
-      'x-amz-acl': 'public-read'
+      'ACL': 'public-read'
     }
   , TYPES: {
       'js': 'utf8'
@@ -119,12 +119,11 @@ var S3Sync = klass(function (config, options) {
       var body =  fs.createReadStream(file)
       var headers = _.extend({}, this.getSettings(), this._mergeHeaders(file))
 
-      this.client.upload({
+      this.client.upload(_.merge({
         Body: body,
         Bucket: this.bucket,
-        Key: s3FileNameWithPrefix,
-        headers
-      })
+        Key: s3FileNameWithPrefix
+      }, headers))
       .send(function(err, data) {
         if (err) {
           console.error('error in putting original file', err)
@@ -192,10 +191,10 @@ var S3Sync = klass(function (config, options) {
   , _mergeHeaders: function (file) {
       var o = {}
       if (file.match('.gz')) {
-        o['Content-Encoding'] = 'gzip'
-        o['Cache-Control'] = 'max-age=1314000'
+        o['ContentEncoding'] = 'gzip'
+        o['CacheControl'] = 'max-age=1314000'
       }
-      o['Content-Type'] = mime.lookup(file)
+      o['ContentType'] = mime.lookup(file)
       // overwrite `gz` headers
       if (file.match('.js')) o['Content-Type'] = 'application/javascript'
       if (file.match('.css')) o['Content-Type'] = 'text/css'
