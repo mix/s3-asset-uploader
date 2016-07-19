@@ -85,12 +85,11 @@ var S3Sync = klass(function (config, options) {
     }
   , writeDigestFile: function (callback) {
       var headers = v.extend({}, this.getSettings(), this._mergeHeaders(this.digest))
-      var digestKey = this.prefix + this.digest
 
       this.client.upload(v.extend({
         Body: JSON.stringify(this.getDigest()),
         Bucket: this.bucket,
-        Key: digestKey
+        Key: this.digest
       }, headers))
       .send(callback)
     }
