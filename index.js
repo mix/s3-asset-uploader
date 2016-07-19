@@ -146,7 +146,10 @@ var S3Sync = klass(function (config, options) {
             }
             else{ done() }
           })
-        }.bind(this), done)
+        }.bind(this), function (err) {
+          if (/already exists/i.test(err.message)) done()
+          else done(err)
+        })
     }
   , s3FilePreCheck: function (file) {
       // check for existence of file and reject if it exists to avoid uploading same file again
@@ -156,6 +159,7 @@ var S3Sync = klass(function (config, options) {
           Key: file
         }, function (err, res) {
           if (this.httpResponse.statusCode == 404) resolve()
+          else if (this.httpResponse.statusCode == 200) reject(new Error('File already exists - ' + file))
           else {
             console.log('error in getFileResponse', this.httpResponse.statusCode, err)
             reject(new Error('S3 File precheck failed [' + this.httpResponse.statusCode + '] for ' + file))
