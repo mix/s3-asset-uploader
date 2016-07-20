@@ -194,8 +194,8 @@ var S3Sync = klass(function (config, options) {
       }
       o['ContentType'] = mime.lookup(file)
       // overwrite `gz` headers
-      if (file.match('.js')) o['Content-Type'] = 'application/javascript'
-      if (file.match('.css')) o['Content-Type'] = 'text/css'
+      if (file.match('.js')) o['ContentType'] = 'application/javascript'
+      if (file.match('.css')) o['ContentType'] = 'text/css'
       return o
     }
   , _addToDigest: function (file) {
