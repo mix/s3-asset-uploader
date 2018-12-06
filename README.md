@@ -1,4 +1,7 @@
 ## AWS S3 asset uploader
+
+[![Greenkeeper badge](https://badges.greenkeeper.io/mix/s3-asset-uploader.svg)](https://greenkeeper.io/)
+
 for putting assets on s3
 
 ``` js
