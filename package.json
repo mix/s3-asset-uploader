@@ -4,7 +4,7 @@
   "description": "aws s3 asset uploader",
   "main": "index.js",
   "scripts": {
-    "test": "make test"
+    "test": "./node_modules/.bin/eslint ./"
   },
   "repository": {
     "type": "git",
@@ -25,8 +25,10 @@
     "aws-sdk": "^2.4.6",
     "bluebird": "^3.1.5",
     "findit": "~2.0.0",
-    "klass": "~1.4.0",
     "mime": "^2.3.1",
     "valentine": "~2.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^5.9.0"
   }
 }
