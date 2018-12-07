@@ -218,7 +218,7 @@ function mergeHeaders(file) {
     o['ContentEncoding'] = 'gzip'
     o['CacheControl'] = 'max-age=1314000'
   }
-  o['ContentType'] = mime.lookup(file)
+  o['ContentType'] = mime.getType(file)
   // overwrite `gz` headers
   if (file.match('.js')) {
     o['ContentType'] = 'application/javascript'
