@@ -122,7 +122,7 @@ class S3Sync {
     debug('putting original file %s at destination %s', file, s3FileNameWithPrefix)
 
     const body =  fs.createReadStream(file)
-    const headers = Object.assign({}, this.getSettings(), this._mergeHeaders(file))
+    const headers = Object.assign({}, this.getSettings(), mergeHeaders(file))
 
     this.client.upload(Object.assign({
       Body: body,
@@ -172,7 +172,7 @@ class S3Sync {
       this.client.getObject({
         Bucket: this.bucket,
         Key: file
-      }, err => {
+      }, function (err) {
         if (this.httpResponse.statusCode == 404) {
           resolve()
         } else if (this.httpResponse.statusCode == 200) {
