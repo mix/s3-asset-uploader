@@ -5,21 +5,23 @@
 for putting assets on s3
 
 ``` js
-var Sync = require('s3-asset-uploader').S3sync
-var config =  {
-    "key": "<key>"
-  , "secret": "<secret>"
-  , "bucket": "<bucket-name>"
-  , "cloudfront": "<cf-domain>"
+const { S3Sync } = require('s3-asset-uploader')
+
+const config =  {
+  "key": "<key>",
+  "secret": "<secret>",
+  "bucket": "<s3-bucket-name>"
+}
+const options = {
+  path: './public',
+  ignorePaths: ['public/js/vendor'],
+  prefix: '/assets',
+  digestFileName: 'config/asset-map.json',
+  digestOnly: false
 }
 
-new Sync(config, {
-    path: './public'
-  , prefix: '/assets'
-  , ignorePath: './public/js/vendor'
-  , digest: 'config/asset-map.json'
-  , complete: function () {
-      console.log('done')
-    }
+const sync = new S3Sync(config, options)
+sync.run().then(digest => {
+  console.log('Synchronized with S3! Digest: ', digest)
 })
 ```

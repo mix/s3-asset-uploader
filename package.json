@@ -1,7 +1,7 @@
 {
   "name": "s3-asset-uploader",
-  "version": "0.2.2",
-  "description": "aws s3 asset uploader",
+  "version": "2.0.0",
+  "description": "AWS S3 Asset Uploader",
   "main": "index.js",
   "scripts": {
     "test": "./node_modules/.bin/eslint ./"
@@ -15,20 +15,23 @@
     "aws",
     "uploader"
   ],
-  "author": "OpenLikes",
+  "author": "Mix Tech Inc.",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/mix/s3-asset-uploader/issues"
   },
   "homepage": "https://github.com/mix/s3-asset-uploader",
   "dependencies": {
-    "aws-sdk": "^2.4.6",
-    "bluebird": "^3.1.5",
-    "findit": "~2.0.0",
-    "mime": "^2.3.1",
-    "valentine": "~2.1.0"
+    "aws-sdk": "^2.382.0",
+    "bluebird": "^3.5.3",
+    "debug": "^4.1.1",
+    "mime": "^2.4.0"
   },
   "devDependencies": {
+    "@types/bluebird": "^3.5.25",
+    "@types/debug": "0.0.31",
+    "@types/mime": "^2.0.0",
+    "@types/node": "^10.12.18",
     "eslint": "^5.9.0"
   }
 }
