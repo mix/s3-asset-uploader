@@ -41,10 +41,12 @@ const DEFAULT_GZIP_HEADERS = {
  * @property {Array.<(RegExp|string)>} [ignorePaths] - do not synchronize these paths with S3
  * @property {string} [prefix] - prepended to all destination file names when uploaded
  * @property {AWS.S3.ObjectKey} [digestFileName] - the destination file name of the generated digest file
- * @property {boolean} [digestOnly] - upload only the generated digest file
- * @property {boolean} [dryRun] - don't upload anything, just log what would have been uploaded
  * @property {S3UploadHeaders} [headers] - params used by AWS.S3 upload method
  * @property {S3UploadHeaders} [gzipHeaders] - params used by AWS.S3 upload method for GZIP files
+ * @property {boolean} [noUpload] - don't upload anything, just log what would have been uploaded
+ * @property {boolean} [noUploadDigestFile] - don't upload the digest mapping file
+ * @property {boolean} [noUploadOriginalFiles] - don't upload the original (unhashed) files
+ * @property {boolean} [noUploadHashedFiles] - don't upload the hashed files
  */
 
 /** @typedef {string} AbsoluteFilePath */
@@ -88,11 +90,13 @@ class S3Sync {
     this.path = fs.realpathSync(options.path)
     this.ignorePaths = options.ignorePaths || []
     this.digestFileName = options.digestFileName || DEFAULT_DIGEST_FILE_NAME
-    this.digestOnly = options.digestOnly || false
-    this.dryRun = options.dryRun || false
     this.prefix = options.prefix || ''
     this.headers = options.headers || {}
     this.gzipHeaders = options.gzipHeaders || DEFAULT_GZIP_HEADERS
+    this.noUpload = options.noUpload || false
+    this.noUploadDigestFile = options.noUploadDigestFile || false
+    this.noUploadOriginalFiles = options.noUploadOriginalFiles || false
+    this.noUploadHashedFiles = options.noUploadHashedFiles || false
     this.reset()
   }
 
@@ -154,9 +158,6 @@ class S3Sync {
    * @private
    */
   syncFiles() {
-    if (this.digestOnly) {
-      return Bluebird.resolve()
-    }
     return Bluebird.mapSeries(this.gatheredFilePaths, filePath => {
       return Bluebird.props({
         originalFile: this.uploadOriginalFile(filePath),
@@ -186,6 +187,10 @@ class S3Sync {
    * @private
    */
   uploadDigest() {
+    if (this.noUploadDigestFile) {
+      debug('[noUploadDigestFile] NOT uploading', this.digestFileName)
+      return Bluebird.resolve()
+    }
     debug('Uploading digest file', this.digestFileName)
     return this.upload({
       'ACL': DEFAULT_ACL,
@@ -204,6 +209,10 @@ class S3Sync {
   uploadOriginalFile(filePath) {
     const originalFileName = this.relativeFileName(filePath)
     const key = this.s3KeyForRelativeFileName(originalFileName)
+    if (this.noUploadOriginalFiles) {
+      debug('[noUploadOriginalFiles] NOT uploading', key)
+      return Bluebird.resolve()
+    }
     const etag = this.filePathToEtagMap[filePath]
     return this.shouldUpload(key, etag)
     .then(shouldUpload => {
@@ -230,6 +239,10 @@ class S3Sync {
     if (!key) {
       // This should never happen under normal circumstances!
       debug('Missing hash for original file: ', originalFileName)
+      return Bluebird.resolve()
+    }
+    if (this.noUploadHashedFiles) {
+      debug('[noUploadHashedFiles] NOT uploading', key)
       return Bluebird.resolve()
     }
     return transformLib.replaceHashedFilenames({
@@ -261,8 +274,8 @@ class S3Sync {
    * @private
    */
   upload(params) {
-    if (this.dryRun) {
-      debug('[DRY-RUN] NOT uploading', params['Key'])
+    if (this.noUpload) {
+      debug('[noUpload] NOT uploading', params['Key'])
       return Bluebird.resolve()
     }
     return Bluebird.fromCallback(callback => {
@@ -277,6 +290,10 @@ class S3Sync {
    * @private
    */
   shouldUpload(key, etag) {
+    if (this.noUpload) {
+      debug('[noUpload] NOT uploading', key)
+      return Bluebird.resolve(false)
+    }
     return Bluebird.fromCallback(callback => {
       this.client.headObject({
         'Bucket': this.bucket,
