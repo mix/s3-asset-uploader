@@ -1,236 +1,379 @@
+/**
+ * Top-level s3-asset-uploader module
+ * @module s3-asset-uploader
+ * @see README.md
+ */
+
+// Node imports
 const fs = require('fs')
-const crypto = require('crypto')
 const path = require('path')
-const finder = require('findit')
-const debug = require('debug')('mix:s3')
-const Promise = require('bluebird')
+// NPM imports
+const debug = require('debug')('s3-asset-uploader')
 const AWS = require('aws-sdk')
-const mime = require('mime')
+const Bluebird = require('bluebird')
+// Lib imports
+const directoryLib = require('./lib/directory')
+const fileLib = require('./lib/file')
+const hashLib = require('./lib/hash')
+const transformLib = require('./lib/transform')
 
-const DEFAULT_HEADERS = {
-  'ACL': 'public-read'
-}
-const TYPES = {
-  'js': 'utf8',
-  'css': 'utf8',
-  'sass': 'utf8',
-  'scss': 'utf8',
-  'png': 'binary',
-  'jpg': 'binary',
-  'jpeg': 'binary',
-  'gif': 'binary',
-  'ico': 'binary'
+const FILE_EXTENSION_REGEXP = /((\.\w+)?\.\w+)$/
+const DEFAULT_ACL = 'public-read'
+const DEFAULT_DIGEST_FILE_NAME = 'asset-map.json'
+const DEFAULT_GZIP_CACHE_CONTROL = `max-age=${365*24*60*60}` // 1 year (in seconds)
+const DEFAULT_GZIP_HEADERS = {
+  'ContentEncoding': 'gzip',
+  'CacheControl': DEFAULT_GZIP_CACHE_CONTROL
 }
 
+/**
+ * The configuration Object passed into the `S3Sync` constructor
+ * @typedef {Object} S3SyncConfig
+ * @property {string} key - your AWS access key ID
+ * @property {string} secret - your AWS secret access key
+ * @property {AWS.S3.BucketName} bucket - the name of the destination AWS S3 bucket
+ */
+
+/**
+ * The options Object passed into the `S3Sync` constructor
+ * @typedef {Object} S3SyncOptions
+ * @property {string} path - the base path to synchronize with S3
+ * @property {Array.<(RegExp|string)>} [ignorePaths] - skip these paths when gathering files
+ * @property {AWS.S3.ObjectKey} [digestFileKey] - the destination key of the generated digest file
+ * @property {string} [prefix] - prepended to all destination file names when uploaded
+ * @property {S3UploadHeaders} [headers] - extra params used by `AWS.S3` upload method
+ * @property {S3UploadHeaders} [gzipHeaders] - extra params used by `AWS.S3` upload method for GZIP files
+ * @property {boolean} [noUpload] - don't upload anything, just generate a digest mapping
+ * @property {boolean} [noUploadDigestFile] - don't upload the digest mapping file
+ * @property {boolean} [noUploadOriginalFiles] - don't upload the original (unhashed) files
+ * @property {boolean} [noUploadHashedFiles] - don't upload the hashed files
+ */
+
+/** @typedef {string} AbsoluteFilePath */
+/** @typedef {string} RelativeFileName */
+/** @typedef {AWS.S3.ObjectKey} HashedS3Key */
+/** @typedef {Object.<RelativeFileName,HashedS3Key>} S3SyncDigest */
+/** @typedef {AWS.S3.PutObjectRequest} S3UploadParams */
+/** @typedef {(AWS.S3.CompleteMultipartUploadOutput|void)} S3UploadResult */
+
+/**
+ * @typedef {Object} S3SyncFileResult
+ * @property {string} filePath
+ * @property {S3UploadResult} originalFile
+ * @property {S3UploadResult} hashedFile
+ */
+
+/**
+ * Some (but not all) of the parameters needed for `S3UploadParams`
+ * @typedef {Object} S3UploadHeaders
+ * @property {AWS.S3.ObjectCannedACL} ACL
+ * @property {AWS.S3.BucketName} Bucket
+ * @property {AWS.S3.CacheControl} [CacheControl]
+ * @property {AWS.S3.ContentType} ContentType
+ * @property {AWS.S3.ContentEncoding} [ContentEncoding]
+ */
+
+/**
+ * Class representing an operation to synchronize a directory with an Amazon S3 bucket
+ */
 class S3Sync {
-  constructor (config, options) {
-    this.options = options
-    AWS.config.accessKeyId = config.key
-    AWS.config.secretKeyId = config.secret
-    this.client = new AWS.S3()
+  /**
+   * @param {S3SyncConfig} config
+   * @param {S3SyncOptions} options
+   * @constructor
+   */
+  constructor(config, options) {
+    this.client = new AWS.S3({
+      accessKeyId: config.key,
+      secretAccessKey: config.secret
+    })
     this.bucket = config.bucket
-    this.path = options.path
+    this.path = fs.realpathSync(options.path)
+    this.ignorePaths = options.ignorePaths || []
+    this.digestFileKey = options.digestFileKey || DEFAULT_DIGEST_FILE_NAME
     this.prefix = options.prefix || ''
-    this.digest = options.digest
-    this._inProgress = false
-    this._files = []
-    this._digest = {}
-    this._timer
+    this.headers = options.headers || {}
+    this.gzipHeaders = options.gzipHeaders || DEFAULT_GZIP_HEADERS
+    this.noUpload = options.noUpload || false
+    this.noUploadDigestFile = options.noUploadDigestFile || false
+    this.noUploadOriginalFiles = options.noUploadOriginalFiles || false
+    this.noUploadHashedFiles = options.noUploadHashedFiles || false
+    this.reset()
   }
 
-  static md5(text) {
-    return crypto
-    .createHash('md5')
-    .update(text)
-    .digest('hex')
+  /**
+   * The main work-horse method that performs all of the sub-tasks to synchronize
+   * @returns {Bluebird<S3SyncDigest>}
+   * @public
+   */
+  run() {
+    return this.gatherFiles()
+    .then(() => this.addFilesToDigest())
+    .then(() => this.syncFiles())
+    .then(() => this.uploadDigestFile())
+    .then(() => this.digest)
+    .finally(() => this.reset())
   }
 
-  init() {
-    this.finder(this.path)
-    .on('file', this.addFile.bind(this))
-    .on('end', this.start.bind(this))
+  /**
+   * Resets the `S3Sync` instance back to its initial state
+   * @returns {void}
+   * @private
+   */
+  reset() {
+    /** @type {Array.<AbsoluteFilePath>} */
+    this.gatheredFilePaths = []
+    /** @type {Object.<AbsoluteFilePath,AWS.S3.ETag>} */
+    this.filePathToEtagMap = {}
+    /** @type {S3SyncDigest} */
+    this.digest = {}
   }
 
-  getSettings() {
-    return Object.assign({}, this.options.headers || {}, DEFAULT_HEADERS)
+  /**
+   * Walks the `this.path` directory and collects all of the file paths
+   * @returns {Bluebird<void>}
+   * @private
+   */
+  gatherFiles() {
+    return directoryLib.getFileNames(this.path, this.ignorePaths)
+    .then(filePaths => {
+      this.gatheredFilePaths.push(...filePaths)
+    })
   }
 
-  finder(path) {
-    return finder(path)
+  /**
+   * Iterates through the gathered files and generates the hashed digest mapping
+   * @returns {Bluebird<S3SyncDigest>}
+   * @private
+   */
+  addFilesToDigest() {
+    return Bluebird.mapSeries(this.gatheredFilePaths, filePath => {
+      return this.addFileToDigest(filePath)
+    })
+    .then(() => this.digest)
   }
 
-  addFile(file) {
-    if (!this.options.ignorePath) {
-      this._files.push(file)
-    } else if (!(new RegExp('^' + this.options.ignorePath).test(path.dirname(file)))) {
-      this._files.push(file)
-    }
-  }
-
-  start() {
-    if (!this._files.length) {
-      this.writeDigestFile((err, resp) => {
-        if (err) {
-          debug('error writing digest file', err)
-        } else {
-          debug('wrote digest file', resp)
-        }
-        this.options.complete && this.options.complete(err)
+  /**
+   * Uploads the gathered files
+   * @returns {Bluebird<Array.<S3SyncFileResult>>}
+   * @private
+   */
+  syncFiles() {
+    return Bluebird.mapSeries(this.gatheredFilePaths, filePath => {
+      return Bluebird.props({
+        filePath,
+        originalFile: this.uploadOriginalFile(filePath),
+        hashedFile: this.uploadHashedFile(filePath)
       })
-    } else if (this._inProgress) {
-      this._timer = setTimeout(this.start.bind(this), 50)
-    } else {
-      if (this.options.digestOnly) {
-        addToDigest.call(this, this._files.pop())
-        this.start()
-      } else {
-        this._inProgress = true
-        this.put(this._files.pop(), this.handlePutResponse.bind(this))
-      }
+    })
+  }
+
+  /**
+   * Hashes the file and adds it to the digest
+   * @param {AbsoluteFilePath} filePath
+   * @returns {Bluebird<void>}
+   * @private
+   */
+  addFileToDigest(filePath) {
+    return hashLib.hashFromFile(filePath)
+    .then(hash => {
+      const originalFileName = this.relativeFileName(filePath)
+      const hashedFileName = this.hashedFileName(originalFileName, hash)
+      this.filePathToEtagMap[filePath] = hash
+      this.digest[originalFileName] = hashedFileName
+    })
+  }
+
+  /**
+   * @returns {Bluebird<S3UploadResult>}
+   * @private
+   */
+  uploadDigestFile() {
+    const key = this.digestFileKey
+    if (this.noUploadDigestFile) {
+      debug(`SKIPPING key[${key}] reason[noUploadDigestFile]`)
+      return Bluebird.resolve()
     }
+    return this.upload({
+      'ACL': DEFAULT_ACL,
+      'Body': JSON.stringify(this.digest),
+      'Bucket': this.bucket,
+      'ContentType': 'application/json',
+      'Key': key
+    })
   }
 
-  writeDigestFile(callback) {
-    const headers = Object.assign({}, this.getSettings(), mergeHeaders(this.digest))
-
-    this.client.upload(Object.assign({
-      Body: JSON.stringify(this.getDigest()),
-      Bucket: this.bucket,
-      Key: this.digest
-    }, headers))
-    .send(callback)
-  }
-
-  readFileContents(file) {
-    return fs.readFileSync(file, TYPES[file.split('.').pop()])
-  }
-
-  hashContents(file) {
-    const contents = this.readFileContents(file)
-    const up = file.substring(this.path.length)
-    const hash = S3Sync.md5(contents)
-    return up.replace(/(\.\w+)$/, '-' + hash + '$1')
-  }
-
-  put(file, done) {
-    addToDigest.call(this, file)
-
-    const s3FileName = file.substring(this.path.length)
-    const s3FileNameWithPrefix = this.prefix + s3FileName
-    const md5File = this._digest[s3FileName]
-
-    debug('putting original file %s at destination %s', file, s3FileNameWithPrefix)
-
-    const body =  fs.createReadStream(file)
-    const headers = Object.assign({}, this.getSettings(), mergeHeaders(file))
-
-    this.client.upload(Object.assign({
-      Body: body,
-      Bucket: this.bucket,
-      Key: s3FileNameWithPrefix
-    }, headers))
-    .send(err => {
-      if (err) {
-        done(err)
-      } else {
-        this.md5PreCheck(file, md5File, done)
+  /**
+   * @param {AbsoluteFilePath} filePath
+   * @returns {Bluebird<S3UploadResult>}
+   * @private
+   */
+  uploadOriginalFile(filePath) {
+    const originalFileName = this.relativeFileName(filePath)
+    const key = this.s3KeyForRelativeFileName(originalFileName)
+    if (this.noUploadOriginalFiles) {
+      debug(`SKIPPING key[${key}] reason[noUploadOriginalFiles]`)
+      return Bluebird.resolve()
+    }
+    const etag = this.filePathToEtagMap[filePath]
+    return this.shouldUpload(key, etag)
+    .then(shouldUpload => {
+      if (shouldUpload) {
+        const headers = this.fileHeaders(filePath)
+        const params = Object.assign({}, headers, {
+          'Key': key,
+          'Body': fs.createReadStream(filePath)
+        })
+        return this.upload(params)
       }
     })
   }
 
-  md5PreCheck(file, md5File, done) {
-    this.s3FilePreCheck(md5File)
-    .then(() => {
-      debug('putting new file', md5File)
-      const md5body =  fs.createReadStream(file)
-      const md5headers = Object.assign({}, this.getSettings(), mergeHeaders(md5File))
-      this.client.upload(Object.assign({
-        Body: md5body,
-        Bucket: this.bucket,
-        Key: md5File
-      }, md5headers))
-      .send(err => {
-        if (err) {
-          done(err)
-        } else{
-          done()
+  /**
+   * @param {AbsoluteFilePath} filePath
+   * @returns {Bluebird<S3UploadResult>}
+   * @private
+   */
+  uploadHashedFile(filePath) {
+    const originalFileName = this.relativeFileName(filePath)
+    const key = this.digest[originalFileName]
+    if (!key) {
+      // This should never happen under normal circumstances!
+      debug(`SKIPPING filePath[${filePath}] reason[NotInDigest]`)
+      return Bluebird.resolve()
+    }
+    if (this.noUploadHashedFiles) {
+      debug(`SKIPPING key[${key}] reason[noUploadHashedFiles]`)
+      return Bluebird.resolve()
+    }
+    return transformLib.replaceHashedFilenames({
+      filePath,
+      relativeFileName: originalFileName,
+      digest: this.digest
+    })
+    .then(({ transformed, stream, hash }) => {
+      const etag = transformed ? hash : this.filePathToEtagMap[filePath]
+      return this.shouldUpload(key, etag)
+      .then(shouldUpload => {
+        if (shouldUpload) {
+          const headers = this.fileHeaders(filePath)
+          const params = Object.assign({}, headers, {
+            'Key': key,
+            'Body': stream
+          })
+          return this.upload(params)
         }
       })
+    })
+  }
+
+  /**
+   * @param {S3UploadParams} params
+   * @returns {Bluebird<S3UploadResult>}
+   * @see https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#upload-property
+   * @private
+   */
+  upload(params) {
+    const key = params['Key']
+    if (this.noUpload) {
+      debug(`SKIPPING key[${key}] reason[noUpload]`)
+      return Bluebird.resolve()
+    }
+    debug(`UPLOADING key[${key}]`)
+    return Bluebird.fromCallback(callback => {
+      this.client.upload(params, callback)
+    })
+  }
+
+  /**
+   * @param {AWS.S3.ObjectKey} key
+   * @param {AWS.S3.ETag} etag
+   * @returns {Bluebird<boolean>}
+   * @private
+   */
+  shouldUpload(key, etag) {
+    if (this.noUpload) {
+      debug(`SKIPPING key[${key}] reason[noUpload]`)
+      return Bluebird.resolve(false)
+    }
+    return Bluebird.fromCallback(callback => {
+      this.client.headObject({
+        'Bucket': this.bucket,
+        'Key': key,
+        'IfNoneMatch': etag
+      }, callback)
+    })
+    .then(() => {
+      // File found, ETag does not match
+      return true
     })
     .catch(err => {
-      if (/already exists/i.test(err.message)) {
-        done()
-      } else {
-        done(err)
+      switch (err.name) {
+        case 'NotModified':
+          debug(`SKIPPING key[${key}] reason[NotModified]`)
+          return false
+        case 'NotFound':
+          return true
+        default:
+          throw err
       }
     })
   }
 
-  s3FilePreCheck(file) {
-    // check for existence of file and reject if it exists to avoid uploading same file again
-    return new Promise((resolve, reject) => {
-      this.client.getObject({
-        Bucket: this.bucket,
-        Key: file
-      }, function (err) {
-        if (this.httpResponse.statusCode == 404) {
-          resolve()
-        } else if (this.httpResponse.statusCode == 200) {
-          reject(new Error('File already exists - ' + file))
-        } else {
-          reject(
-            new Error('S3 File precheck failed [' + this.httpResponse.statusCode + '] for ' +
-              file + ': ' + err.message)
-          )
-        }
-      })
-    })
+  /**
+   * @param {AbsoluteFilePath} filePath
+   * @returns {RelativeFileName}
+   * @private
+   */
+  relativeFileName(filePath) {
+    return filePath.substring(this.path.length + path.sep.length)
   }
 
-  abort(e) {
-    this._timer && clearTimeout(this._timer)
-    debug('S3 sync aborted', e)
-    this.options.complete && this.options.complete(new Error('Sync aborted'))
+  /**
+   * @param {RelativeFileName} fileName
+   * @returns {AWS.S3.ObjectKey}
+   * @private
+   */
+  s3KeyForRelativeFileName(fileName) {
+    return path.posix.join(this.prefix, fileName)
   }
 
-  getDigest() {
-    return this._digest
+  /**
+   * @param {RelativeFileName} fileName
+   * @param {AWS.S3.ETag} hash
+   * @returns {HashedS3Key}
+   * @private
+   */
+  hashedFileName(fileName, hash) {
+    return this.s3KeyForRelativeFileName(fileName)
+    .replace(FILE_EXTENSION_REGEXP, `-${hash}$1`)
   }
 
-  handlePutResponse(error) {
-    if (error) {
-      this.options.error && this.options.error(error)
-      this.abort(error)
-    } else {
-      this._inProgress = false
-      this.start()
+  /**
+   * @param {AbsoluteFilePath} filePath
+   * @returns {S3UploadHeaders}
+   * @private
+   */
+  fileHeaders(filePath) {
+    const defaultHeaders = {
+      'ACL': DEFAULT_ACL,
+      'Bucket': this.bucket
     }
+    const fileHeaders = {
+      'ContentType': fileLib.getContentType(filePath)
+    }
+    const gzipHeaders = fileLib.isGzipped(filePath)
+    ? this.gzipHeaders
+    : {}
+    return Object.assign(
+      defaultHeaders,
+      this.headers,
+      fileHeaders,
+      gzipHeaders
+    )
   }
 }
 
 module.exports = {
   S3Sync
-}
-
-function mergeHeaders(file) {
-  const o = {}
-  if (file.match('.gz')) {
-    o['ContentEncoding'] = 'gzip'
-    o['CacheControl'] = 'max-age=1314000'
-  }
-  o['ContentType'] = mime.getType(file)
-  // overwrite `gz` headers
-  if (file.match('.js')) {
-    o['ContentType'] = 'application/javascript'
-  }
-  if (file.match('.css')) {
-    o['ContentType'] = 'text/css'
-  }
-  return o
-}
-
-function addToDigest(file) {
-  const md5File = this.prefix + this.hashContents(file)
-  const s3FileName = file.substring(this.path.length)
-  this._digest[s3FileName] = md5File
 }
