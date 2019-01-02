@@ -4,7 +4,9 @@
   "description": "AWS S3 Asset Uploader",
   "main": "index.js",
   "scripts": {
-    "test": "./node_modules/.bin/eslint ./"
+    "test": "npm run lint && npm run check-types",
+    "lint": "./node_modules/.bin/eslint .",
+    "check-types": "./node_modules/.bin/tsc"
   },
   "repository": {
     "type": "git",
@@ -32,6 +34,7 @@
     "@types/debug": "0.0.31",
     "@types/mime": "^2.0.0",
     "@types/node": "^10.12.18",
-    "eslint": "^5.9.0"
+    "eslint": "^5.9.0",
+    "typescript": "^3.2.2"
   }
 }
