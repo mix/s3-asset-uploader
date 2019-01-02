@@ -109,7 +109,7 @@ class S3Sync {
     return this.gatherFiles()
     .then(() => this.addFilesToDigest())
     .then(() => this.syncFiles())
-    .then(() => this.uploadDigest())
+    .then(() => this.uploadDigestFile())
     .then(() => this.digest)
     .finally(() => this.reset())
   }
@@ -186,18 +186,18 @@ class S3Sync {
    * @returns {Bluebird<S3UploadResult>}
    * @private
    */
-  uploadDigest() {
+  uploadDigestFile() {
+    const key = this.digestFileName
     if (this.noUploadDigestFile) {
-      debug('[noUploadDigestFile] NOT uploading', this.digestFileName)
+      debug(`SKIPPING key[${key}] reason[noUploadDigestFile]`)
       return Bluebird.resolve()
     }
-    debug('Uploading digest file', this.digestFileName)
     return this.upload({
       'ACL': DEFAULT_ACL,
       'Body': JSON.stringify(this.digest),
       'Bucket': this.bucket,
       'ContentType': 'application/json',
-      'Key': this.digestFileName
+      'Key': key
     })
   }
 
@@ -210,7 +210,7 @@ class S3Sync {
     const originalFileName = this.relativeFileName(filePath)
     const key = this.s3KeyForRelativeFileName(originalFileName)
     if (this.noUploadOriginalFiles) {
-      debug('[noUploadOriginalFiles] NOT uploading', key)
+      debug(`SKIPPING key[${key}] reason[noUploadOriginalFiles]`)
       return Bluebird.resolve()
     }
     const etag = this.filePathToEtagMap[filePath]
@@ -222,7 +222,6 @@ class S3Sync {
           'Key': key,
           'Body': fs.createReadStream(filePath)
         })
-        debug('Uploading original file: ', key)
         return this.upload(params)
       }
     })
@@ -238,11 +237,11 @@ class S3Sync {
     const key = this.digest[originalFileName]
     if (!key) {
       // This should never happen under normal circumstances!
-      debug('Missing hash for original file: ', originalFileName)
+      debug(`SKIPPING filePath[${filePath}] reason[NotInDigest]`)
       return Bluebird.resolve()
     }
     if (this.noUploadHashedFiles) {
-      debug('[noUploadHashedFiles] NOT uploading', key)
+      debug(`SKIPPING key[${key}] reason[noUploadHashedFiles]`)
       return Bluebird.resolve()
     }
     return transformLib.replaceHashedFilenames({
@@ -260,7 +259,6 @@ class S3Sync {
             'Key': key,
             'Body': stream
           })
-          debug('Uploading hashed file: ', key)
           return this.upload(params)
         }
       })
@@ -274,10 +272,12 @@ class S3Sync {
    * @private
    */
   upload(params) {
+    const key = params['Key']
     if (this.noUpload) {
-      debug('[noUpload] NOT uploading', params['Key'])
+      debug(`SKIPPING key[${key}] reason[noUpload]`)
       return Bluebird.resolve()
     }
+    debug(`UPLOADING key[${key}]`)
     return Bluebird.fromCallback(callback => {
       this.client.upload(params, callback)
     })
@@ -291,7 +291,7 @@ class S3Sync {
    */
   shouldUpload(key, etag) {
     if (this.noUpload) {
-      debug('[noUpload] NOT uploading', key)
+      debug(`SKIPPING key[${key}] reason[noUpload]`)
       return Bluebird.resolve(false)
     }
     return Bluebird.fromCallback(callback => {
@@ -307,9 +307,13 @@ class S3Sync {
     })
     .catch(err => {
       switch (err.name) {
-        case 'NotFound': return true
-        case 'NotModified': return false
-        default: throw err
+        case 'NotModified':
+          debug(`SKIPPING key[${key}] reason[NotModified]`)
+          return false
+        case 'NotFound':
+          return true
+        default:
+          throw err
       }
     })
   }
