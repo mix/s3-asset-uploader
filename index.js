@@ -20,7 +20,7 @@ const transformLib = require('./lib/transform')
 const FILE_EXTENSION_REGEXP = /((\.\w+)?\.\w+)$/
 const DEFAULT_ACL = 'public-read'
 const DEFAULT_DIGEST_FILE_NAME = 'asset-map.json'
-const DEFAULT_GZIP_CACHE_CONTROL = 'max-age=1314000'
+const DEFAULT_GZIP_CACHE_CONTROL = `max-age=${365*24*60*60}` // 1 year (in seconds)
 const DEFAULT_GZIP_HEADERS = {
   'ContentEncoding': 'gzip',
   'CacheControl': DEFAULT_GZIP_CACHE_CONTROL
