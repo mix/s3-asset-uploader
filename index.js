@@ -55,6 +55,12 @@ const DEFAULT_GZIP_HEADERS = {
 /** @typedef {(AWS.S3.CompleteMultipartUploadOutput|void)} S3UploadResult */
 
 /**
+ * @typedef {Object} S3SyncFileResult
+ * @property {S3UploadResult} originalFile
+ * @property {S3UploadResult} hashedFile
+ */
+
+/**
  * Some (but not all) of the parameters needed for `S3UploadParams`
  * @typedef {Object} S3UploadHeaders
  * @property {AWS.S3.ObjectCannedACL} ACL
@@ -132,19 +138,19 @@ class S3Sync {
 
   /**
    * Iterates through the gathered files and generates the hashed digest mapping
-   * @returns {Bluebird<void>}
+   * @returns {Bluebird<S3SyncDigest>}
    * @private
    */
   addFilesToDigest() {
     return Bluebird.mapSeries(this.gatheredFilePaths, filePath => {
       return this.addFileToDigest(filePath)
     })
-    .then(() => {}) // Normalize fulfilled value to void/undefined
+    .then(() => this.digest)
   }
 
   /**
    * Uploads the gathered files
-   * @returns {Bluebird<void>}
+   * @returns {Bluebird<Array.<S3SyncFileResult>>}
    * @private
    */
   syncFiles() {
@@ -152,10 +158,11 @@ class S3Sync {
       return Bluebird.resolve()
     }
     return Bluebird.mapSeries(this.gatheredFilePaths, filePath => {
-      return this.uploadOriginalFile(filePath)
-      .then(() => this.uploadHashedFile(filePath))
+      return Bluebird.props({
+        originalFile: this.uploadOriginalFile(filePath),
+        hashedFile: this.uploadHashedFile(filePath)
+      })
     })
-    .then(() => {}) // Normalize fulfilled value to void/undefined
   }
 
   /**
