@@ -33,7 +33,7 @@ const options = {
   path: './public',
   ignorePaths: ['js/vendor', '.DS_Store'],
   prefix: 'assets',
-  digestFileName: 'config/asset-map.json'
+  digestFileKey: 'config/asset-map.json'
 }
 
 const s3SyncUploader = new S3Sync(config, options)
