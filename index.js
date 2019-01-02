@@ -38,12 +38,12 @@ const DEFAULT_GZIP_HEADERS = {
  * The options Object passed into the `S3Sync` constructor
  * @typedef {Object} S3SyncOptions
  * @property {string} path - the base path to synchronize with S3
- * @property {Array.<(RegExp|string)>} [ignorePaths] - do not synchronize these paths with S3
+ * @property {Array.<(RegExp|string)>} [ignorePaths] - skip these paths when gathering files
+ * @property {AWS.S3.ObjectKey} [digestFileKey] - the destination key of the generated digest file
  * @property {string} [prefix] - prepended to all destination file names when uploaded
- * @property {AWS.S3.ObjectKey} [digestFileName] - the destination file name of the generated digest file
- * @property {S3UploadHeaders} [headers] - params used by AWS.S3 upload method
- * @property {S3UploadHeaders} [gzipHeaders] - params used by AWS.S3 upload method for GZIP files
- * @property {boolean} [noUpload] - don't upload anything, just log what would have been uploaded
+ * @property {S3UploadHeaders} [headers] - extra params used by `AWS.S3` upload method
+ * @property {S3UploadHeaders} [gzipHeaders] - extra params used by `AWS.S3` upload method for GZIP files
+ * @property {boolean} [noUpload] - don't upload anything, just generate a digest mapping
  * @property {boolean} [noUploadDigestFile] - don't upload the digest mapping file
  * @property {boolean} [noUploadOriginalFiles] - don't upload the original (unhashed) files
  * @property {boolean} [noUploadHashedFiles] - don't upload the hashed files
@@ -58,6 +58,7 @@ const DEFAULT_GZIP_HEADERS = {
 
 /**
  * @typedef {Object} S3SyncFileResult
+ * @property {string} filePath
  * @property {S3UploadResult} originalFile
  * @property {S3UploadResult} hashedFile
  */
@@ -89,7 +90,7 @@ class S3Sync {
     this.bucket = config.bucket
     this.path = fs.realpathSync(options.path)
     this.ignorePaths = options.ignorePaths || []
-    this.digestFileName = options.digestFileName || DEFAULT_DIGEST_FILE_NAME
+    this.digestFileKey = options.digestFileKey || DEFAULT_DIGEST_FILE_NAME
     this.prefix = options.prefix || ''
     this.headers = options.headers || {}
     this.gzipHeaders = options.gzipHeaders || DEFAULT_GZIP_HEADERS
@@ -160,6 +161,7 @@ class S3Sync {
   syncFiles() {
     return Bluebird.mapSeries(this.gatheredFilePaths, filePath => {
       return Bluebird.props({
+        filePath,
         originalFile: this.uploadOriginalFile(filePath),
         hashedFile: this.uploadHashedFile(filePath)
       })
@@ -187,7 +189,7 @@ class S3Sync {
    * @private
    */
   uploadDigestFile() {
-    const key = this.digestFileName
+    const key = this.digestFileKey
     if (this.noUploadDigestFile) {
       debug(`SKIPPING key[${key}] reason[noUploadDigestFile]`)
       return Bluebird.resolve()
