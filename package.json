@@ -33,7 +33,7 @@
     "@types/bluebird": "^3.5.25",
     "@types/debug": "4.1.0",
     "@types/mime": "^2.0.0",
-    "@types/node": "^10.12.18",
+    "@types/node": "^11.9.0",
     "eslint": "^5.9.0",
     "typescript": "^3.2.2"
   }
