@@ -34,7 +34,7 @@
     "@types/debug": "4.1.0",
     "@types/mime": "^2.0.0",
     "@types/node": "^10.12.18",
-    "eslint": "^5.9.0",
+    "eslint": "^6.0.0",
     "typescript": "^3.2.2"
   }
 }
