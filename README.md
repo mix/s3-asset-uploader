@@ -18,6 +18,8 @@ Key | Type | Description
 `noUploadDigestFile` | `boolean` | don't upload the digest mapping file
 `noUploadOriginalFiles` | `boolean` | don't upload the original (unhashed) files
 `noUploadHashedFiles` | `boolean` | don't upload the hashed files
+`hashedOriginalFileRegexp` | `RegExp | boolean` | respect hashes in original filenames; use this if your webpack output pattern includes `[chunkhash]`
+`includePseudoUnhashedOriginalFilesInDigest` | `boolean` | add pseudo-entries to the digest for the "unhashed" variant of hashed original files
 
 ### Example usage
 

@@ -18,6 +18,7 @@ const hashLib = require('./lib/hash')
 const transformLib = require('./lib/transform')
 
 const FILE_EXTENSION_REGEXP = /((\.\w+)?\.\w+)$/
+const HASHED_FILENAME_REGEXP = /(-[0-9a-f]{32})((\.\w+)+)$/
 const DEFAULT_ACL = 'public-read'
 const DEFAULT_DIGEST_FILE_NAME = 'asset-map.json'
 const DEFAULT_GZIP_CACHE_CONTROL = `max-age=${365*24*60*60}` // 1 year (in seconds)
@@ -43,6 +44,8 @@ const DEFAULT_GZIP_HEADERS = {
  * @property {string} [prefix] - prepended to all destination file names when uploaded
  * @property {S3UploadHeaders} [headers] - extra params used by `AWS.S3` upload method
  * @property {S3UploadHeaders} [gzipHeaders] - extra params used by `AWS.S3` upload method for GZIP files
+ * @property {RegExp|boolean} [hashedOriginalFileRegexp] - respect hashes in original filenames
+ * @property {boolean} [includePseudoUnhashedOriginalFilesInDigest] - add pseudo-entries to the digest
  * @property {boolean} [noUpload] - don't upload anything, just generate a digest mapping
  * @property {boolean} [noUploadDigestFile] - don't upload the digest mapping file
  * @property {boolean} [noUploadOriginalFiles] - don't upload the original (unhashed) files
@@ -92,12 +95,22 @@ class S3Sync {
     this.ignorePaths = options.ignorePaths || []
     this.digestFileKey = options.digestFileKey || DEFAULT_DIGEST_FILE_NAME
     this.prefix = options.prefix || ''
+    // Header options
     this.headers = options.headers || {}
     this.gzipHeaders = options.gzipHeaders || DEFAULT_GZIP_HEADERS
-    this.noUpload = options.noUpload || false
-    this.noUploadDigestFile = options.noUploadDigestFile || false
-    this.noUploadOriginalFiles = options.noUploadOriginalFiles || false
-    this.noUploadHashedFiles = options.noUploadHashedFiles || false
+    // Upload options
+    this.noUpload = Boolean(options.noUpload)
+    this.noUploadDigestFile = Boolean(options.noUploadDigestFile)
+    this.noUploadOriginalFiles = Boolean(options.noUploadOriginalFiles)
+    this.noUploadHashedFiles = Boolean(options.noUploadHashedFiles)
+    // Hashed original file options
+    if (options.hashedOriginalFileRegexp instanceof RegExp) {
+      this.hashedOriginalFileRegexp = options.hashedOriginalFileRegexp
+    } else if (options.hashedOriginalFileRegexp === true) {
+      this.hashedOriginalFileRegexp = HASHED_FILENAME_REGEXP
+    }
+    this.includePseudoUnhashedOriginalFilesInDigest =
+      Boolean(options.includePseudoUnhashedOriginalFilesInDigest)
     this.reset()
   }
 
@@ -177,10 +190,19 @@ class S3Sync {
   addFileToDigest(filePath) {
     return hashLib.hashFromFile(filePath)
     .then(hash => {
-      const originalFileName = this.relativeFileName(filePath)
-      const hashedFileName = this.hashedFileName(originalFileName, hash)
       this.filePathToEtagMap[filePath] = hash
-      this.digest[originalFileName] = hashedFileName
+      const originalFileName = this.relativeFileName(filePath)
+      const originalFileKey = this.s3KeyForRelativeFileName(originalFileName)
+      if (this.isHashedFileName(originalFileName)) {
+        if (this.includePseudoUnhashedOriginalFilesInDigest) {
+          const unhashedFileName = this.unhashedFileName(originalFileName)
+          this.digest[unhashedFileName] = originalFileKey
+        }
+        this.digest[originalFileName] = originalFileKey
+      } else {
+        const hashedFileKey = this.hashedFileKey(originalFileKey, hash)
+        this.digest[originalFileName] = hashedFileKey
+      }
     })
   }
 
@@ -210,18 +232,18 @@ class S3Sync {
    */
   uploadOriginalFile(filePath) {
     const originalFileName = this.relativeFileName(filePath)
-    const key = this.s3KeyForRelativeFileName(originalFileName)
-    if (this.noUploadOriginalFiles) {
-      debug(`SKIPPING key[${key}] reason[noUploadOriginalFiles]`)
+    const originalFileKey = this.s3KeyForRelativeFileName(originalFileName)
+    if (this.noUploadOriginalFiles && !this.isHashedFileName(originalFileName)) {
+      debug(`SKIPPING key[${originalFileKey}] reason[noUploadOriginalFiles]`)
       return Bluebird.resolve()
     }
     const etag = this.filePathToEtagMap[filePath]
-    return this.shouldUpload(key, etag)
+    return this.shouldUpload(originalFileKey, etag)
     .then(shouldUpload => {
       if (shouldUpload) {
         const headers = this.fileHeaders(filePath)
         const params = Object.assign({}, headers, {
-          'Key': key,
+          'Key': originalFileKey,
           'Body': fs.createReadStream(filePath)
         })
         return this.upload(params)
@@ -236,14 +258,19 @@ class S3Sync {
    */
   uploadHashedFile(filePath) {
     const originalFileName = this.relativeFileName(filePath)
-    const key = this.digest[originalFileName]
-    if (!key) {
+    const originalFileKey = this.s3KeyForRelativeFileName(originalFileName)
+    const hashedFileKey = this.digest[originalFileName]
+    if (!hashedFileKey) {
       // This should never happen under normal circumstances!
       debug(`SKIPPING filePath[${filePath}] reason[NotInDigest]`)
       return Bluebird.resolve()
     }
+    if (hashedFileKey === originalFileKey) {
+      debug(`SKIPPING key[${hashedFileKey}] reason[originalFileIsHashed]`)
+      return Bluebird.resolve()
+    }
     if (this.noUploadHashedFiles) {
-      debug(`SKIPPING key[${key}] reason[noUploadHashedFiles]`)
+      debug(`SKIPPING key[${hashedFileKey}] reason[noUploadHashedFiles]`)
       return Bluebird.resolve()
     }
     return transformLib.replaceHashedFilenames({
@@ -253,12 +280,12 @@ class S3Sync {
     })
     .then(({ transformed, stream, hash }) => {
       const etag = transformed ? hash : this.filePathToEtagMap[filePath]
-      return this.shouldUpload(key, etag)
+      return this.shouldUpload(hashedFileKey, etag)
       .then(shouldUpload => {
         if (shouldUpload) {
           const headers = this.fileHeaders(filePath)
           const params = Object.assign({}, headers, {
-            'Key': key,
+            'Key': hashedFileKey,
             'Body': stream
           })
           return this.upload(params)
@@ -339,14 +366,33 @@ class S3Sync {
   }
 
   /**
-   * @param {RelativeFileName} fileName
+   * @param {AWS.S3.ObjectKey} fileKey
    * @param {AWS.S3.ETag} hash
    * @returns {HashedS3Key}
    * @private
    */
-  hashedFileName(fileName, hash) {
-    return this.s3KeyForRelativeFileName(fileName)
-    .replace(FILE_EXTENSION_REGEXP, `-${hash}$1`)
+  hashedFileKey(fileKey, hash) {
+    return fileKey.replace(FILE_EXTENSION_REGEXP, `-${hash}$1`)
+  }
+
+  /**
+   * @param {RelativeFileName} fileName
+   * @returns {boolean}
+   * @private
+   */
+  isHashedFileName(fileName) {
+    return this.hashedOriginalFileRegexp
+    ? this.hashedOriginalFileRegexp.test(fileName)
+    : false
+  }
+
+  /**
+   * @param {RelativeFileName} hashedFileName
+   * @returns {RelativeFileName}
+   * @private
+   */
+  unhashedFileName(hashedFileName) {
+    return hashedFileName.replace(HASHED_FILENAME_REGEXP, '$2')
   }
 
   /**
