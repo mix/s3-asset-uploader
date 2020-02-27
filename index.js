@@ -392,7 +392,7 @@ class S3Sync {
    * @private
    */
   unhashedFileName(hashedFileName) {
-    return hashedFileName.replace(HASHED_FILENAME_REGEXP, '$2')
+    return hashedFileName.replace(this.hashedOriginalFileRegexp, '$2')
   }
 
   /**
