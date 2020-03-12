@@ -116,16 +116,19 @@ class S3Sync {
 
   /**
    * The main work-horse method that performs all of the sub-tasks to synchronize
-   * @returns {Bluebird<S3SyncDigest>}
+   * @returns {Promise.<S3SyncDigest>}
    * @public
    */
-  run() {
-    return this.gatherFiles()
-    .then(() => this.addFilesToDigest())
-    .then(() => this.syncFiles())
-    .then(() => this.uploadDigestFile())
-    .then(() => this.digest)
-    .finally(() => this.reset())
+  async run() {
+    try {
+      await this.gatherFiles()
+      await this.addFilesToDigest()
+      await this.syncFiles()
+      await this.uploadDigestFile()
+      return this.digest
+    } finally {
+      this.reset()
+    }
   }
 
   /**
@@ -144,34 +147,32 @@ class S3Sync {
 
   /**
    * Walks the `this.path` directory and collects all of the file paths
-   * @returns {Bluebird<void>}
+   * @returns {Promise.<void>}
    * @private
    */
-  gatherFiles() {
-    return directoryLib.getFileNames(this.path, this.ignorePaths)
-    .then(filePaths => {
-      this.gatheredFilePaths.push(...filePaths)
-    })
+  async gatherFiles() {
+    const filePaths = await directoryLib.getFileNames(this.path, this.ignorePaths)
+    this.gatheredFilePaths.push(...filePaths)
   }
 
   /**
    * Iterates through the gathered files and generates the hashed digest mapping
-   * @returns {Bluebird<S3SyncDigest>}
+   * @returns {Promise.<S3SyncDigest>}
    * @private
    */
-  addFilesToDigest() {
-    return Bluebird.mapSeries(this.gatheredFilePaths, filePath => {
-      return this.addFileToDigest(filePath)
-    })
-    .then(() => this.digest)
+  async addFilesToDigest() {
+    for (let filePath of this.gatheredFilePaths) {
+      await this.addFileToDigest(filePath)
+    }
+    return this.digest
   }
 
   /**
    * Uploads the gathered files
-   * @returns {Bluebird<Array.<S3SyncFileResult>>}
+   * @returns {Promise.<Array.<S3SyncFileResult>>}
    * @private
    */
-  syncFiles() {
+  async syncFiles() {
     return Bluebird.mapSeries(this.gatheredFilePaths, filePath => {
       return Bluebird.props({
         filePath,
@@ -184,37 +185,35 @@ class S3Sync {
   /**
    * Hashes the file and adds it to the digest
    * @param {AbsoluteFilePath} filePath
-   * @returns {Bluebird<void>}
+   * @returns {Promise.<void>}
    * @private
    */
-  addFileToDigest(filePath) {
-    return hashLib.hashFromFile(filePath)
-    .then(hash => {
-      this.filePathToEtagMap[filePath] = hash
-      const originalFileName = this.relativeFileName(filePath)
-      const originalFileKey = this.s3KeyForRelativeFileName(originalFileName)
-      if (this.isHashedFileName(originalFileName)) {
-        if (this.includePseudoUnhashedOriginalFilesInDigest) {
-          const unhashedFileName = this.unhashedFileName(originalFileName)
-          this.digest[unhashedFileName] = originalFileKey
-        }
-        this.digest[originalFileName] = originalFileKey
-      } else {
-        const hashedFileKey = this.hashedFileKey(originalFileKey, hash)
-        this.digest[originalFileName] = hashedFileKey
+  async addFileToDigest(filePath) {
+    const hash = await hashLib.hashFromFile(filePath)
+    this.filePathToEtagMap[filePath] = hash
+    const originalFileName = this.relativeFileName(filePath)
+    const originalFileKey = this.s3KeyForRelativeFileName(originalFileName)
+    if (this.isHashedFileName(originalFileName)) {
+      if (this.includePseudoUnhashedOriginalFilesInDigest) {
+        const unhashedFileName = this.unhashedFileName(originalFileName)
+        this.digest[unhashedFileName] = originalFileKey
       }
-    })
+      this.digest[originalFileName] = originalFileKey
+    } else {
+      let hashedFileKey = this.hashedFileKey(originalFileKey, hash)
+      this.digest[originalFileName] = hashedFileKey
+    }
   }
 
   /**
-   * @returns {Bluebird<S3UploadResult>}
+   * @returns {Promise.<S3UploadResult>}
    * @private
    */
-  uploadDigestFile() {
+  async uploadDigestFile() {
     const key = this.digestFileKey
     if (this.noUploadDigestFile) {
       debug(`SKIPPING key[${key}] reason[noUploadDigestFile]`)
-      return Bluebird.resolve()
+      return
     }
     return this.upload({
       'ACL': DEFAULT_ACL,
@@ -227,84 +226,76 @@ class S3Sync {
 
   /**
    * @param {AbsoluteFilePath} filePath
-   * @returns {Bluebird<S3UploadResult>}
+   * @returns {Promise.<S3UploadResult>}
    * @private
    */
-  uploadOriginalFile(filePath) {
+  async uploadOriginalFile(filePath) {
     const originalFileName = this.relativeFileName(filePath)
     const originalFileKey = this.s3KeyForRelativeFileName(originalFileName)
     if (this.noUploadOriginalFiles && !this.isHashedFileName(originalFileName)) {
       debug(`SKIPPING key[${originalFileKey}] reason[noUploadOriginalFiles]`)
-      return Bluebird.resolve()
+      return
     }
     const etag = this.filePathToEtagMap[filePath]
-    return this.shouldUpload(originalFileKey, etag)
-    .then(shouldUpload => {
-      if (shouldUpload) {
-        const headers = this.fileHeaders(filePath)
-        const params = Object.assign({}, headers, {
-          'Key': originalFileKey,
-          'Body': fs.createReadStream(filePath)
-        })
-        return this.upload(params)
-      }
-    })
+    if (await this.shouldUpload(originalFileKey, etag)) {
+      return this.upload({
+        ...this.fileHeaders(filePath),
+        'Key': originalFileKey,
+        'Body': fs.createReadStream(filePath)
+      })
+    }
   }
 
   /**
    * @param {AbsoluteFilePath} filePath
-   * @returns {Bluebird<S3UploadResult>}
+   * @returns {Promise.<S3UploadResult>}
    * @private
    */
-  uploadHashedFile(filePath) {
+  async uploadHashedFile(filePath) {
     const originalFileName = this.relativeFileName(filePath)
     const originalFileKey = this.s3KeyForRelativeFileName(originalFileName)
     const hashedFileKey = this.digest[originalFileName]
     if (!hashedFileKey) {
       // This should never happen under normal circumstances!
       debug(`SKIPPING filePath[${filePath}] reason[NotInDigest]`)
-      return Bluebird.resolve()
+      return
     }
     if (hashedFileKey === originalFileKey) {
       debug(`SKIPPING key[${hashedFileKey}] reason[originalFileIsHashed]`)
-      return Bluebird.resolve()
+      return
     }
     if (this.noUploadHashedFiles) {
       debug(`SKIPPING key[${hashedFileKey}] reason[noUploadHashedFiles]`)
-      return Bluebird.resolve()
+      return
     }
-    return transformLib.replaceHashedFilenames({
+    const transformResult = await transformLib.replaceHashedFilenames({
       filePath,
       relativeFileName: originalFileName,
       digest: this.digest
     })
-    .then(({ transformed, stream, hash }) => {
-      const etag = transformed ? hash : this.filePathToEtagMap[filePath]
-      return this.shouldUpload(hashedFileKey, etag)
-      .then(shouldUpload => {
-        if (shouldUpload) {
-          const headers = this.fileHeaders(filePath)
-          const params = Object.assign({}, headers, {
-            'Key': hashedFileKey,
-            'Body': stream
-          })
-          return this.upload(params)
-        }
+    let fileStream = transformResult.stream
+    let fileHeaders = this.fileHeaders(filePath)
+    const etag = transformResult.hash || this.filePathToEtagMap[filePath]
+    if (await this.shouldUpload(hashedFileKey, etag)) {
+      return this.upload({
+        ...fileHeaders,
+        'Key': hashedFileKey,
+        'Body': fileStream
       })
-    })
+    }
   }
 
   /**
    * @param {S3UploadParams} params
-   * @returns {Bluebird<S3UploadResult>}
+   * @returns {Promise.<S3UploadResult>}
    * @see https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#upload-property
    * @private
    */
-  upload(params) {
+  async upload(params) {
     const key = params['Key']
     if (this.noUpload) {
       debug(`SKIPPING key[${key}] reason[noUpload]`)
-      return Bluebird.resolve()
+      return
     }
     debug(`UPLOADING key[${key}]`)
     return Bluebird.fromCallback(callback => {
@@ -315,26 +306,25 @@ class S3Sync {
   /**
    * @param {AWS.S3.ObjectKey} key
    * @param {AWS.S3.ETag} etag
-   * @returns {Bluebird<boolean>}
+   * @returns {Promise.<boolean>}
    * @private
    */
-  shouldUpload(key, etag) {
+  async shouldUpload(key, etag) {
     if (this.noUpload) {
       debug(`SKIPPING key[${key}] reason[noUpload]`)
-      return Bluebird.resolve(false)
+      return false
     }
-    return Bluebird.fromCallback(callback => {
-      this.client.headObject({
-        'Bucket': this.bucket,
-        'Key': key,
-        'IfNoneMatch': etag
-      }, callback)
-    })
-    .then(() => {
+    try {
+      await Bluebird.fromCallback(callback => {
+        this.client.headObject({
+          'Bucket': this.bucket,
+          'Key': key,
+          'IfNoneMatch': etag
+        }, callback)
+      })
       // File found, ETag does not match
       return true
-    })
-    .catch(err => {
+    } catch (err) {
       switch (err.name) {
         case 'NotModified':
           debug(`SKIPPING key[${key}] reason[NotModified]`)
@@ -344,7 +334,7 @@ class S3Sync {
         default:
           throw err
       }
-    })
+    }
   }
 
   /**
