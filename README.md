@@ -14,6 +14,7 @@ Key | Type | Description
 `prefix` | `string` | prepended to file names **(but not `digestFileKey`!)** when uploaded
 `headers` | `S3UploadHeaders` | extra params used by `AWS.S3` upload method
 `gzipHeaders` | `S3UploadHeaders` | extra params used by `AWS.S3` upload method for GZIP files
+`gzipHashedFileKeyRegexp` | `RegExp` | gzip the hashed files that match this pattern
 `noUpload` | `boolean` | don't upload anything, just generate a digest mapping
 `noUploadDigestFile` | `boolean` | don't upload the digest mapping file
 `noUploadOriginalFiles` | `boolean` | don't upload the original (unhashed) files
