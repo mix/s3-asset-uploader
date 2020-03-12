@@ -15,6 +15,7 @@ const Bluebird = require('bluebird')
 const directoryLib = require('./lib/directory')
 const fileLib = require('./lib/file')
 const hashLib = require('./lib/hash')
+const streamLib = require('./lib/stream')
 const transformLib = require('./lib/transform')
 
 const FILE_EXTENSION_REGEXP = /((\.\w+)?\.\w+)$/
@@ -282,7 +283,7 @@ class S3Sync {
     let fileStream = transformResult.stream
     let fileHeaders = this.fileHeaders(filePath)
     if (this.shouldGzipHashedFileKey(hashedFileKey)) {
-      fileStream = transformLib.gzipStream(fileStream)
+      fileStream = streamLib.gzipStream(fileStream)
       fileHeaders = { ...fileHeaders, ...this.gzipHeaders }
     }
     const etag = transformResult.hash || this.filePathToEtagMap[filePath]
