@@ -44,6 +44,7 @@ const DEFAULT_GZIP_HEADERS = {
  * @property {string} [prefix] - prepended to all destination file names when uploaded
  * @property {S3UploadHeaders} [headers] - extra params used by `AWS.S3` upload method
  * @property {S3UploadHeaders} [gzipHeaders] - extra params used by `AWS.S3` upload method for GZIP files
+ * @property {RegExp} [gzipHashedFileKeyRegexp] - gzip files when hashing them
  * @property {RegExp|boolean} [hashedOriginalFileRegexp] - respect hashes in original filenames
  * @property {boolean} [includePseudoUnhashedOriginalFilesInDigest] - add pseudo-entries to the digest
  * @property {boolean} [noUpload] - don't upload anything, just generate a digest mapping
@@ -103,6 +104,8 @@ class S3Sync {
     this.noUploadDigestFile = Boolean(options.noUploadDigestFile)
     this.noUploadOriginalFiles = Boolean(options.noUploadOriginalFiles)
     this.noUploadHashedFiles = Boolean(options.noUploadHashedFiles)
+    // gzip options
+    this.gzipHashedFileKeyRegexp = options.gzipHashedFileKeyRegexp
     // Hashed original file options
     if (options.hashedOriginalFileRegexp instanceof RegExp) {
       this.hashedOriginalFileRegexp = options.hashedOriginalFileRegexp
@@ -201,6 +204,9 @@ class S3Sync {
       this.digest[originalFileName] = originalFileKey
     } else {
       let hashedFileKey = this.hashedFileKey(originalFileKey, hash)
+      if (this.shouldGzipHashedFileKey(hashedFileKey)) {
+        hashedFileKey += '.gz'
+      }
       this.digest[originalFileName] = hashedFileKey
     }
   }
@@ -275,6 +281,10 @@ class S3Sync {
     })
     let fileStream = transformResult.stream
     let fileHeaders = this.fileHeaders(filePath)
+    if (this.shouldGzipHashedFileKey(hashedFileKey)) {
+      fileStream = transformLib.gzipStream(fileStream)
+      fileHeaders = { ...fileHeaders, ...this.gzipHeaders }
+    }
     const etag = transformResult.hash || this.filePathToEtagMap[filePath]
     if (await this.shouldUpload(hashedFileKey, etag)) {
       return this.upload({
@@ -383,6 +393,18 @@ class S3Sync {
    */
   unhashedFileName(hashedFileName) {
     return hashedFileName.replace(this.hashedOriginalFileRegexp, '$2')
+  }
+
+  /**
+   * @param {string} fileKey
+   * @returns {boolean}
+   * @private
+   */
+  shouldGzipHashedFileKey(fileKey) {
+    if (this.gzipHashedFileKeyRegexp) {
+      return this.gzipHashedFileKeyRegexp.test(fileKey)
+    }
+    return false
   }
 
   /**
