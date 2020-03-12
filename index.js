@@ -205,7 +205,7 @@ class S3Sync {
       this.digest[originalFileName] = originalFileKey
     } else {
       let hashedFileKey = this.hashedFileKey(originalFileKey, hash)
-      if (this.shouldGzipHashedFileKey(hashedFileKey)) {
+      if (this.shouldGzipHashedFileKey(originalFileKey)) {
         hashedFileKey += '.gz'
       }
       this.digest[originalFileName] = hashedFileKey
@@ -282,7 +282,7 @@ class S3Sync {
     })
     let fileStream = transformResult.stream
     let fileHeaders = this.fileHeaders(filePath)
-    if (this.shouldGzipHashedFileKey(hashedFileKey)) {
+    if (this.shouldGzipHashedFileKey(originalFileKey)) {
       fileStream = streamLib.gzipStream(fileStream)
       fileHeaders = { ...fileHeaders, ...this.gzipHeaders }
     }
@@ -397,13 +397,13 @@ class S3Sync {
   }
 
   /**
-   * @param {string} fileKey
+   * @param {string} originalFileKey
    * @returns {boolean}
    * @private
    */
-  shouldGzipHashedFileKey(fileKey) {
-    if (this.gzipHashedFileKeyRegexp) {
-      return this.gzipHashedFileKeyRegexp.test(fileKey)
+  shouldGzipHashedFileKey(originalFileKey) {
+    if (this.gzipHashedFileKeyRegexp instanceof RegExp) {
+      return this.gzipHashedFileKeyRegexp.test(originalFileKey)
     }
     return false
   }
