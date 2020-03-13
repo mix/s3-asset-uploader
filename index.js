@@ -40,7 +40,7 @@ const DEFAULT_GZIP_HEADERS = {
  * The options Object passed into the `S3Sync` constructor
  * @typedef {Object} S3SyncOptions
  * @property {string} path - the base path to synchronize with S3
- * @property {Array.<(RegExp|string)>} [ignorePaths] - skip these paths when gathering files
+ * @property {Array.<RegExp|string>} [ignorePaths] - skip these paths when gathering files
  * @property {AWS.S3.ObjectKey} [digestFileKey] - the destination key of the generated digest file
  * @property {string} [prefix] - prepended to all destination file names when uploaded
  * @property {S3UploadHeaders} [headers] - extra params used by `AWS.S3` upload method
@@ -48,6 +48,7 @@ const DEFAULT_GZIP_HEADERS = {
  * @property {RegExp} [gzipHashedFileKeyRegexp] - gzip files when hashing them
  * @property {RegExp|boolean} [hashedOriginalFileRegexp] - respect hashes in original filenames
  * @property {boolean} [includePseudoUnhashedOriginalFilesInDigest] - add pseudo-entries to the digest
+ * @property {boolean} [forceUpload] - skip `shouldUpload` etag modified lookup for keys before uploading
  * @property {boolean} [noUpload] - don't upload anything, just generate a digest mapping
  * @property {boolean} [noUploadDigestFile] - don't upload the digest mapping file
  * @property {boolean} [noUploadOriginalFiles] - don't upload the original (unhashed) files
@@ -59,7 +60,7 @@ const DEFAULT_GZIP_HEADERS = {
 /** @typedef {AWS.S3.ObjectKey} HashedS3Key */
 /** @typedef {Object.<RelativeFileName,HashedS3Key>} S3SyncDigest */
 /** @typedef {AWS.S3.PutObjectRequest} S3UploadParams */
-/** @typedef {(AWS.S3.CompleteMultipartUploadOutput|void)} S3UploadResult */
+/** @typedef {AWS.S3.CompleteMultipartUploadOutput|void} S3UploadResult */
 
 /**
  * @typedef {Object} S3SyncFileResult
@@ -101,6 +102,7 @@ class S3Sync {
     this.headers = options.headers || {}
     this.gzipHeaders = options.gzipHeaders || DEFAULT_GZIP_HEADERS
     // Upload options
+    this.forceUpload = Boolean(options.forceUpload)
     this.noUpload = Boolean(options.noUpload)
     this.noUploadDigestFile = Boolean(options.noUploadDigestFile)
     this.noUploadOriginalFiles = Boolean(options.noUploadOriginalFiles)
@@ -324,6 +326,9 @@ class S3Sync {
     if (this.noUpload) {
       debug(`SKIPPING key[${key}] reason[noUpload]`)
       return false
+    }
+    if (this.forceUpload) {
+      return true
     }
     try {
       await Bluebird.fromCallback(callback => {
