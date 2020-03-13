@@ -206,10 +206,7 @@ class S3Sync {
       }
       this.digest[originalFileName] = originalFileKey
     } else {
-      let hashedFileKey = this.hashedFileKey(originalFileKey, hash)
-      if (this.shouldGzipHashedFileKey(originalFileKey)) {
-        hashedFileKey += '.gz'
-      }
+      const hashedFileKey = this.hashedFileKey(originalFileKey, hash)
       this.digest[originalFileName] = hashedFileKey
     }
   }
@@ -241,16 +238,24 @@ class S3Sync {
   async uploadOriginalFile(filePath) {
     const originalFileName = this.relativeFileName(filePath)
     const originalFileKey = this.s3KeyForRelativeFileName(originalFileName)
-    if (this.noUploadOriginalFiles && !this.isHashedFileName(originalFileName)) {
+    const isHashedOriginalFile = this.isHashedFileName(originalFileName)
+    if (this.noUploadOriginalFiles && !isHashedOriginalFile) {
       debug(`SKIPPING key[${originalFileKey}] reason[noUploadOriginalFiles]`)
       return
     }
     const etag = this.filePathToEtagMap[filePath]
     if (await this.shouldUpload(originalFileKey, etag)) {
+      /** @type {NodeJS.ReadableStream} */
+      let fileStream = fs.createReadStream(filePath)
+      let fileHeaders = this.fileHeaders(filePath)
+      if (isHashedOriginalFile && this.shouldGzipHashedFileKey(originalFileKey)) {
+        fileStream = streamLib.gzipStream(fileStream)
+        fileHeaders = { ...fileHeaders, ...this.gzipHeaders }
+      }
       return this.upload({
-        ...this.fileHeaders(filePath),
+        ...fileHeaders,
         'Key': originalFileKey,
-        'Body': fs.createReadStream(filePath)
+        'Body': fileStream
       })
     }
   }
@@ -282,14 +287,14 @@ class S3Sync {
       relativeFileName: originalFileName,
       digest: this.digest
     })
-    let fileStream = transformResult.stream
-    let fileHeaders = this.fileHeaders(filePath)
-    if (this.shouldGzipHashedFileKey(originalFileKey)) {
-      fileStream = streamLib.gzipStream(fileStream)
-      fileHeaders = { ...fileHeaders, ...this.gzipHeaders }
-    }
     const etag = transformResult.hash || this.filePathToEtagMap[filePath]
     if (await this.shouldUpload(hashedFileKey, etag)) {
+      let fileStream = transformResult.stream
+      let fileHeaders = this.fileHeaders(filePath)
+      if (this.shouldGzipHashedFileKey(originalFileKey)) {
+        fileStream = streamLib.gzipStream(fileStream)
+        fileHeaders = { ...fileHeaders, ...this.gzipHeaders }
+      }
       return this.upload({
         ...fileHeaders,
         'Key': hashedFileKey,
