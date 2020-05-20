@@ -31,8 +31,8 @@ const DEFAULT_GZIP_HEADERS = {
 /**
  * The configuration Object passed into the `S3Sync` constructor
  * @typedef {Object} S3SyncConfig
- * @property {string} key - your AWS access key ID
- * @property {string} secret - your AWS secret access key
+ * @property {string} [key] - your AWS access key ID
+ * @property {string} [secret] - your AWS secret access key
  * @property {AWS.S3.BucketName} bucket - the name of the destination AWS S3 bucket
  */
 
@@ -89,13 +89,14 @@ class S3Sync {
    * @constructor
    */
   constructor(config, options) {
-    this.client = new AWS.S3({})
+    let s3ClientConfiguration = {}
     if (config.key && config.secret) {
-      AWS.config.update({
+      s3ClientConfiguration = {
         accessKeyId: config.key,
         secretAccessKey: config.secret
-      })
+      }
     }
+    this.client = new AWS.S3(s3ClientConfiguration)
     this.bucket = config.bucket
     this.path = fs.realpathSync(options.path)
     this.ignorePaths = options.ignorePaths || []
