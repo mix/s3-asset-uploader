@@ -1,6 +1,6 @@
 {
   "name": "s3-asset-uploader",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "AWS S3 Asset Uploader",
   "main": "index.js",
   "scripts": {
