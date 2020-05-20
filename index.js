@@ -89,10 +89,13 @@ class S3Sync {
    * @constructor
    */
   constructor(config, options) {
-    this.client = new AWS.S3({
-      accessKeyId: config.key,
-      secretAccessKey: config.secret
-    })
+    this.client = new AWS.S3({})
+    if (config.key && config.secret) {
+      AWS.config.update({
+        accessKeyId: config.key,
+        secretAccessKey: config.secret
+      })
+    }
     this.bucket = config.bucket
     this.path = fs.realpathSync(options.path)
     this.ignorePaths = options.ignorePaths || []
